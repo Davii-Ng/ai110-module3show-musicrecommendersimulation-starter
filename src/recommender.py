@@ -1,7 +1,172 @@
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Any
 from dataclasses import dataclass
 import csv
 import math
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _gaussian_similarity(value: float, target: float, sigma: float = 0.15) -> float:
+    sigma = max(abs(float(sigma)), 1e-6)
+    return math.exp(-((value - target) ** 2) / (2 * sigma ** 2))
+
+
+def _preferred_mood_tags(user_mood: str) -> set[str]:
+    mood_tag_map = {
+        "happy": {"happy", "euphoric", "warm", "bright"},
+        "chill": {"chill", "dreamy", "warm", "nostalgic"},
+        "relaxed": {"relaxed", "warm", "dreamy", "nostalgic"},
+        "moody": {"moody", "dreamy", "nostalgic"},
+        "sad": {"sad", "dreamy", "nostalgic", "warm"},
+        "intense": {"intense", "aggressive", "euphoric"},
+        "focused": {"focused", "instrumental", "minimal", "clean"},
+        "nostalgic": {"nostalgic", "warm", "dreamy"},
+    }
+    return mood_tag_map.get(user_mood, {user_mood})
+
+
+def _preferred_decade(user_genre: str, user_mood: str, target_energy: float) -> int:
+    if user_mood in {"nostalgic", "chill", "relaxed", "moody", "sad"}:
+        return 1990
+    if user_mood in {"focused"}:
+        return 2000
+    if user_mood in {"happy", "euphoric", "warm"} or user_genre in {"pop", "indie pop", "synthpop"}:
+        return 2010
+    if target_energy >= 0.85:
+        return 2020
+    return 2000
+
+
+def _preferred_popularity(user_genre: str, user_mood: str, target_energy: float, likes_acoustic: bool) -> float:
+    if user_genre in {"pop", "indie pop", "synthpop"} or user_mood in {"happy", "euphoric", "warm"}:
+        return 78.0
+    if user_mood in {"chill", "relaxed", "moody", "focused", "nostalgic", "sad"} or likes_acoustic:
+        return 55.0
+    if target_energy >= 0.85:
+        return 70.0
+    return 62.0
+
+
+def _preferred_instrumentalness(user_genre: str, user_mood: str, likes_acoustic: bool) -> float:
+    if user_mood in {"chill", "relaxed", "focused", "moody", "nostalgic", "sad"} or likes_acoustic:
+        return 0.72
+    if user_genre in {"pop", "indie pop", "synthpop"} or user_mood in {"happy", "euphoric"}:
+        return 0.25
+    return 0.45
+
+
+def _preferred_vocal_presence(user_genre: str, user_mood: str, target_energy: float) -> float:
+    if user_genre in {"pop", "indie pop", "synthpop"} or user_mood in {"happy", "euphoric", "warm"}:
+        return 0.86
+    if user_mood in {"chill", "relaxed", "focused", "moody", "nostalgic", "sad"}:
+        return 0.44
+    if target_energy >= 0.8:
+        return 0.72
+    return 0.58
+
+
+def _preferred_brightness(user_genre: str, user_mood: str, target_energy: float) -> float:
+    if user_genre in {"pop", "indie pop", "synthpop"} or user_mood in {"happy", "euphoric", "warm"}:
+        return 0.78
+    if user_mood in {"chill", "relaxed", "moody", "nostalgic", "sad"}:
+        return 0.45
+    if target_energy >= 0.8:
+        return 0.66
+    return 0.58
+
+
+def _score_song_data(song: Dict[str, Any], user_prefs: Dict[str, Any]) -> Tuple[float, List[str]]:
+    score = 0.0
+    reasons: List[str] = []
+
+    user_genre = str(user_prefs.get("genre", "")).lower()
+    user_mood = str(user_prefs.get("mood", "")).lower()
+    target_energy = _safe_float(user_prefs.get("energy", 0.5), 0.5)
+    likes_acoustic = bool(user_prefs.get("likes_acoustic", False))
+
+    song_genre = str(song.get("genre", "")).lower()
+    song_mood = str(song.get("mood", "")).lower()
+    song_mood_tag = str(song.get("mood_tag", song_mood)).lower()
+
+    if song_genre == user_genre:
+        score += 1.0
+        reasons.append("genre match (+1.0)")
+
+    if song_mood == user_mood:
+        score += 5.0
+        reasons.append("mood match (+5.0)")
+
+    energy_score = _gaussian_similarity(_safe_float(song.get("energy", 0.0), 0.0), target_energy)
+    score += energy_score * 6.0
+    reasons.append(f"energy close to target (+{energy_score * 6.0:.2f})")
+
+    tempo_target = 120.0 if target_energy >= 0.7 else 90.0
+    tempo_score = _gaussian_similarity(_safe_float(song.get("tempo_bpm", 0.0), 0.0), tempo_target, sigma=20.0)
+    score += tempo_score * 1.5
+    reasons.append(f"tempo near preferred range (+{tempo_score * 1.5:.2f})")
+
+    valence_target = 0.75 if user_mood == "happy" else 0.45 if user_mood in {"chill", "moody", "relaxed", "nostalgic", "sad"} else 0.6
+    valence_score = _gaussian_similarity(_safe_float(song.get("valence", 0.0), 0.0), valence_target, sigma=0.18)
+    score += valence_score * 1.5
+    reasons.append(f"valence matches vibe (+{valence_score * 1.5:.2f})")
+
+    danceability_target = 0.8 if target_energy >= 0.7 else 0.55
+    danceability_score = _gaussian_similarity(_safe_float(song.get("danceability", 0.0), 0.0), danceability_target, sigma=0.18)
+    score += danceability_score * 1.0
+    reasons.append(f"danceability fit (+{danceability_score * 1.0:.2f})")
+
+    if likes_acoustic:
+        acoustic_score = _gaussian_similarity(_safe_float(song.get("acousticness", 0.0), 0.0), 0.8, sigma=0.2)
+        score += acoustic_score * 1.0
+        reasons.append(f"acoustic texture fit (+{acoustic_score * 1.0:.2f})")
+    else:
+        acoustic_score = _gaussian_similarity(_safe_float(song.get("acousticness", 0.0), 0.0), 0.2, sigma=0.2)
+        score += acoustic_score * 0.5
+        reasons.append(f"production style fit (+{acoustic_score * 0.5:.2f})")
+
+    popularity_target = _preferred_popularity(user_genre, user_mood, target_energy, likes_acoustic)
+    popularity_score = _gaussian_similarity(_safe_float(song.get("popularity", 50), 50.0), popularity_target, sigma=18.0)
+    score += popularity_score * 1.2
+    reasons.append(f"popularity near {int(round(popularity_target))} (+{popularity_score * 1.2:.2f})")
+
+    decade_target = float(_preferred_decade(user_genre, user_mood, target_energy))
+    decade_score = _gaussian_similarity(_safe_float(song.get("release_decade", 2010), 2010.0), decade_target, sigma=12.0)
+    score += decade_score * 1.3
+    reasons.append(f"release decade aligned with {int(decade_target)}s (+{decade_score * 1.3:.2f})")
+
+    preferred_tags = _preferred_mood_tags(user_mood)
+    if song_mood_tag in preferred_tags:
+        score += 1.4
+        reasons.append(f"mood tag fit ({song_mood_tag}) (+1.40)")
+
+    instrumental_target = _preferred_instrumentalness(user_genre, user_mood, likes_acoustic)
+    instrumental_score = _gaussian_similarity(_safe_float(song.get("instrumentalness", 0.0), 0.0), instrumental_target, sigma=0.18)
+    score += instrumental_score * 1.1
+    reasons.append(f"instrumentalness fit (+{instrumental_score * 1.1:.2f})")
+
+    vocal_target = _preferred_vocal_presence(user_genre, user_mood, target_energy)
+    vocal_score = _gaussian_similarity(_safe_float(song.get("vocal_presence", 0.0), 0.0), vocal_target, sigma=0.18)
+    score += vocal_score * 1.0
+    reasons.append(f"vocal presence fit (+{vocal_score * 1.0:.2f})")
+
+    brightness_target = _preferred_brightness(user_genre, user_mood, target_energy)
+    brightness_score = _gaussian_similarity(_safe_float(song.get("brightness", 0.0), 0.0), brightness_target, sigma=0.16)
+    score += brightness_score * 1.0
+    reasons.append(f"brightness fit (+{brightness_score * 1.0:.2f})")
+
+    return score, reasons
 
 @dataclass
 class Song:
@@ -19,6 +184,12 @@ class Song:
     valence: float
     danceability: float
     acousticness: float
+    popularity: int = 50
+    release_decade: int = 2010
+    mood_tag: str = "balanced"
+    instrumentalness: float = 0.2
+    vocal_presence: float = 0.8
+    brightness: float = 0.5
 
 @dataclass
 class UserProfile:
@@ -40,51 +211,50 @@ class Recommender:
         self.songs = songs
 
     @staticmethod
+    def _diversity_penalty(song: Song, chosen_songs: List[Song]) -> Tuple[float, List[str]]:
+        """Return a penalty for repeating an artist or genre already in the top results."""
+        penalty = 0.0
+        reasons: List[str] = []
+
+        if any(existing_song.artist == song.artist for existing_song in chosen_songs):
+            penalty += 2.0
+            reasons.append("artist already in top results (-2.0)")
+
+        if any(existing_song.genre == song.genre for existing_song in chosen_songs):
+            penalty += 1.0
+            reasons.append("genre already in top results (-1.0)")
+
+        return penalty, reasons
+
+    @staticmethod
     def _gaussian_similarity(value: float, target: float, sigma: float = 0.15) -> float:
         """Return a Gaussian similarity score for two numeric values."""
-        return math.exp(-((value - target) ** 2) / (2 * sigma ** 2))
+        return _gaussian_similarity(value, target, sigma)
 
     def _score_song(self, user: UserProfile, song: Song) -> Tuple[float, List[str]]:
         """Compute a recommendation score and explanation reasons for one song."""
-        score = 0.0
-        reasons: List[str] = []
-
-        if song.genre == user.favorite_genre:
-            score += 1.0
-            reasons.append("genre match (+1.0)")
-
-        if song.mood == user.favorite_mood:
-            score += 5.0
-            reasons.append("mood match (+5.0)")
-
-        energy_score = self._gaussian_similarity(song.energy, user.target_energy)
-        score += energy_score * 6.0
-        reasons.append(f"energy close to target (+{energy_score * 6.0:.2f})")
-
-        tempo_target = 120.0 if user.target_energy >= 0.7 else 90.0
-        tempo_score = self._gaussian_similarity(song.tempo_bpm, tempo_target, sigma=20.0)
-        score += tempo_score * 1.5
-        reasons.append(f"tempo near preferred range (+{tempo_score * 1.5:.2f})")
-
-        valence_target = 0.75 if user.favorite_mood == "happy" else 0.45 if user.favorite_mood in {"chill", "moody", "relaxed"} else 0.6
-        valence_score = self._gaussian_similarity(song.valence, valence_target, sigma=0.18)
-        score += valence_score * 1.5
-        reasons.append(f"valence matches vibe (+{valence_score * 1.5:.2f})")
-
-        danceability_score = self._gaussian_similarity(song.danceability, 0.8 if user.target_energy >= 0.7 else 0.55, sigma=0.18)
-        score += danceability_score * 1.0
-        reasons.append(f"danceability fit (+{danceability_score * 1.0:.2f})")
-
-        if user.likes_acoustic:
-            acoustic_score = self._gaussian_similarity(song.acousticness, 0.8, sigma=0.2)
-            score += acoustic_score * 1.0
-            reasons.append(f"acoustic texture fit (+{acoustic_score * 1.0:.2f})")
-        else:
-            acoustic_score = self._gaussian_similarity(song.acousticness, 0.2, sigma=0.2)
-            score += acoustic_score * 0.5
-            reasons.append(f"production style fit (+{acoustic_score * 0.5:.2f})")
-
-        return score, reasons
+        song_data = {
+            "genre": song.genre,
+            "mood": song.mood,
+            "energy": song.energy,
+            "tempo_bpm": song.tempo_bpm,
+            "valence": song.valence,
+            "danceability": song.danceability,
+            "acousticness": song.acousticness,
+            "popularity": song.popularity,
+            "release_decade": song.release_decade,
+            "mood_tag": song.mood_tag,
+            "instrumentalness": song.instrumentalness,
+            "vocal_presence": song.vocal_presence,
+            "brightness": song.brightness,
+        }
+        user_data = {
+            "genre": user.favorite_genre,
+            "mood": user.favorite_mood,
+            "energy": user.target_energy,
+            "likes_acoustic": user.likes_acoustic,
+        }
+        return _score_song_data(song_data, user_data)
 
     def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
         """Return the top k songs ranked by recommendation score."""
@@ -93,7 +263,17 @@ class Recommender:
             key=lambda item: item[1],
             reverse=True,
         )
-        return [song for song, _ in scored_songs[:k]]
+
+        ranked_songs: List[Tuple[Song, float]] = []
+        chosen_songs: List[Song] = []
+
+        for song, base_score in scored_songs:
+            penalty, _ = self._diversity_penalty(song, chosen_songs)
+            ranked_songs.append((song, base_score - penalty))
+            chosen_songs.append(song)
+
+        ranked_songs.sort(key=lambda item: item[1], reverse=True)
+        return [song for song, _ in ranked_songs[:k]]
 
     def explain_recommendation(self, user: UserProfile, song: Song) -> str:
         """Return a short human-readable explanation for a song score."""
@@ -109,16 +289,22 @@ def load_songs(csv_path: str) -> List[Dict]:
         for row in reader:
             songs.append(
                 {
-                    "id": int(row["id"]),
+                    "id": _safe_int(row.get("id"), 0),
                     "title": row["title"],
                     "artist": row["artist"],
                     "genre": row["genre"],
                     "mood": row["mood"],
-                    "energy": float(row["energy"]),
-                    "tempo_bpm": float(row["tempo_bpm"]),
-                    "valence": float(row["valence"]),
-                    "danceability": float(row["danceability"]),
-                    "acousticness": float(row["acousticness"]),
+                    "energy": _safe_float(row.get("energy"), 0.0),
+                    "tempo_bpm": _safe_float(row.get("tempo_bpm"), 0.0),
+                    "valence": _safe_float(row.get("valence"), 0.0),
+                    "danceability": _safe_float(row.get("danceability"), 0.0),
+                    "acousticness": _safe_float(row.get("acousticness"), 0.0),
+                    "popularity": _safe_int(row.get("popularity"), 50),
+                    "release_decade": _safe_int(row.get("release_decade"), 2010),
+                    "mood_tag": row.get("mood_tag", row.get("mood", "balanced")),
+                    "instrumentalness": _safe_float(row.get("instrumentalness"), 0.2),
+                    "vocal_presence": _safe_float(row.get("vocal_presence"), 0.8),
+                    "brightness": _safe_float(row.get("brightness"), 0.5),
                 }
             )
 
@@ -133,46 +319,31 @@ def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tup
     recommendations: List[Tuple[Dict, float, List[str]]] = []
 
     for song in songs:
-        score = 0.0
-        reasons: List[str] = []
-
-        if song["genre"] == user_prefs.get("genre"):
-            score += 1.0
-            reasons.append("genre match (+1.0)")
-
-        if song["mood"] == user_prefs.get("mood"):
-            score += 5.0
-            reasons.append("mood match (+5.0)")
-
-        target_energy = float(user_prefs.get("energy", 0.5))
-        energy_score = gaussian_similarity(float(song["energy"]), target_energy)
-        score += energy_score * 6.0
-        reasons.append(f"energy close to target (+{energy_score * 6.0:.2f})")
-
-        target_tempo = 120.0 if target_energy >= 0.7 else 90.0
-        tempo_score = gaussian_similarity(float(song["tempo_bpm"]), target_tempo, sigma=20.0)
-        score += tempo_score * 1.5
-        reasons.append(f"tempo near preferred range (+{tempo_score * 1.5:.2f})")
-
-        valence_target = 0.75 if user_prefs.get("mood") == "happy" else 0.45 if user_prefs.get("mood") in {"chill", "moody", "relaxed"} else 0.6
-        valence_score = gaussian_similarity(float(song["valence"]), valence_target, sigma=0.18)
-        score += valence_score * 1.5
-        reasons.append(f"valence matches vibe (+{valence_score * 1.5:.2f})")
-
-        danceability_score = gaussian_similarity(float(song["danceability"]), 0.8 if target_energy >= 0.7 else 0.55, sigma=0.18)
-        score += danceability_score * 1.0
-        reasons.append(f"danceability fit (+{danceability_score * 1.0:.2f})")
-
-        if user_prefs.get("likes_acoustic"):
-            acoustic_score = gaussian_similarity(float(song["acousticness"]), 0.8, sigma=0.2)
-            score += acoustic_score * 1.0
-            reasons.append(f"acoustic texture fit (+{acoustic_score * 1.0:.2f})")
-        else:
-            acoustic_score = gaussian_similarity(float(song["acousticness"]), 0.2, sigma=0.2)
-            score += acoustic_score * 0.5
-            reasons.append(f"production style fit (+{acoustic_score * 0.5:.2f})")
-
+        score, reasons = _score_song_data(song, user_prefs)
         recommendations.append((song, score, reasons))
 
     recommendations.sort(key=lambda item: item[1], reverse=True)
-    return recommendations[:k]
+
+    ranked_recommendations: List[Tuple[Dict, float, List[str]]] = []
+    chosen_songs: List[Dict] = []
+
+    for song, base_score, reasons in recommendations:
+        penalty = 0.0
+        penalty_reasons: List[str] = []
+
+        if any(existing_song["artist"] == song["artist"] for existing_song in chosen_songs):
+            penalty += 2.0
+            penalty_reasons.append("artist already in top results (-2.0)")
+
+        if any(existing_song["genre"] == song["genre"] for existing_song in chosen_songs):
+            penalty += 1.0
+            penalty_reasons.append("genre already in top results (-1.0)")
+
+        adjusted_score = base_score - penalty
+        adjusted_reasons = list(reasons)
+        adjusted_reasons.extend(penalty_reasons)
+        ranked_recommendations.append((song, adjusted_score, adjusted_reasons))
+        chosen_songs.append(song)
+
+    ranked_recommendations.sort(key=lambda item: item[1], reverse=True)
+    return ranked_recommendations[:k]
