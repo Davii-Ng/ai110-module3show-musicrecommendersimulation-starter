@@ -14,20 +14,46 @@ from recommender import load_songs, recommend_songs
 
 def main() -> None:
     songs = load_songs("data/songs.csv")
-    user_prefs = {
-        "genre": "pop",
-        "mood": "happy",
-        "energy": 0.8,
-    }
+    profiles = [
+        (
+            "Conflict profile: high energy + sad",
+            {
+                "genre": "pop",
+                "mood": "sad",
+                "energy": 0.95,
+                "likes_acoustic": True,
+            },
+        ),
+        (
+            "Unknown mood fallback",
+            {
+                "genre": "lofi",
+                "mood": "bittersweet",
+                "energy": 0.6,
+                "likes_acoustic": True,
+            },
+        ),
+        (
+            "Out-of-range energy",
+            {
+                "genre": "pop",
+                "mood": "happy",
+                "energy": 1.8,
+                "likes_acoustic": False,
+            },
+        ),
+    ]
 
-    recommendations = recommend_songs(user_prefs, songs, k=5)
-
-    print("\nTop recommendations:\n")
-    for song, score, reasons in recommendations:
-        print(f"{song['title']} - Score: {score:.2f}")
-        reason_text = ", ".join(reasons) if isinstance(reasons, list) else str(reasons)
-        print(f"Because: {reason_text}")
-        print()
+    print("\nAdversarial profile results:\n")
+    for profile_name, user_prefs in profiles:
+        recommendations = recommend_songs(user_prefs, songs, k=3)
+        print(f"=== {profile_name} ===")
+        print(f"prefs: {user_prefs}\n")
+        for song, score, reasons in recommendations:
+            print(f"{song['title']} - Score: {score:.2f}")
+            reason_text = ", ".join(reasons) if isinstance(reasons, list) else str(reasons)
+            print(f"Because: {reason_text}")
+            print()
 
 
 if __name__ == "__main__":

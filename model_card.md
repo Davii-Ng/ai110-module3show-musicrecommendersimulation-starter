@@ -70,6 +70,8 @@ Prompts:
 - Cases where the system overfits to one preference  
 - Ways the scoring might unintentionally favor some users  
 
+One weakness I found is that the system over-prioritizes exact mood and energy matches, which can make it behave like a narrow filter instead of capturing broader taste. In my experiments, users with conflicting preferences, like very high energy but a sad mood, still got pushed toward songs that matched the strongest single signal rather than the full profile. The small catalog makes this worse because there are only a few songs available, so the recommender keeps circling around the same handful of genres and moods. This can bias the results toward popular, high-scoring patterns instead of giving a diverse set of recommendations. Users whose preferences fall outside the catalog's limited moods or energy ranges may get less relevant suggestions.
+
 ---
 
 ## 7. Evaluation  
@@ -84,6 +86,8 @@ Prompts:
 - Any simple tests or comparisons you ran  
 
 No need for numeric metrics unless you created some.
+
+I tested several user profiles, including a high-energy but sad user, a user with an unknown mood like bittersweet, and a user with an out-of-range energy value. The results showed that the system still produced rankings, but the highest scores often came from whichever signal was strongest, especially mood matches and energy proximity. What surprised me most was how quickly the rankings changed when energy was weighted more heavily, while genre mattered much less than I expected. That made the recommender feel more sensitive to numeric preferences than to overall musical context.
 
 ---
 

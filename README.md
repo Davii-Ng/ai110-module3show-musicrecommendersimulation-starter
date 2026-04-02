@@ -32,7 +32,7 @@ Some prompts to answer:
 You can include a simple diagram or bullet list if helpful.
 
 ![alt text](image.png)
-
+![alt text](image-1.png)
 ---
 
 ## Getting Started

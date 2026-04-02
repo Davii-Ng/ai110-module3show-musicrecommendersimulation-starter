@@ -50,16 +50,16 @@ class Recommender:
         reasons: List[str] = []
 
         if song.genre == user.favorite_genre:
-            score += 2.0
-            reasons.append("genre match (+2.0)")
+            score += 1.0
+            reasons.append("genre match (+1.0)")
 
         if song.mood == user.favorite_mood:
             score += 5.0
             reasons.append("mood match (+5.0)")
 
         energy_score = self._gaussian_similarity(song.energy, user.target_energy)
-        score += energy_score * 3.0
-        reasons.append(f"energy close to target (+{energy_score * 3.0:.2f})")
+        score += energy_score * 6.0
+        reasons.append(f"energy close to target (+{energy_score * 6.0:.2f})")
 
         tempo_target = 120.0 if user.target_energy >= 0.7 else 90.0
         tempo_score = self._gaussian_similarity(song.tempo_bpm, tempo_target, sigma=20.0)
@@ -137,8 +137,8 @@ def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tup
         reasons: List[str] = []
 
         if song["genre"] == user_prefs.get("genre"):
-            score += 2.0
-            reasons.append("genre match (+2.0)")
+            score += 1.0
+            reasons.append("genre match (+1.0)")
 
         if song["mood"] == user_prefs.get("mood"):
             score += 5.0
@@ -146,8 +146,8 @@ def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tup
 
         target_energy = float(user_prefs.get("energy", 0.5))
         energy_score = gaussian_similarity(float(song["energy"]), target_energy)
-        score += energy_score * 3.0
-        reasons.append(f"energy close to target (+{energy_score * 3.0:.2f})")
+        score += energy_score * 6.0
+        reasons.append(f"energy close to target (+{energy_score * 6.0:.2f})")
 
         target_tempo = 120.0 if target_energy >= 0.7 else 90.0
         tempo_score = gaussian_similarity(float(song["tempo_bpm"]), target_tempo, sigma=20.0)
