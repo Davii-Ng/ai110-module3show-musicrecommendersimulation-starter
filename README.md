@@ -6,6 +6,12 @@ This project builds a small music recommender from a hand-made song catalog.
 The system scores songs using user preferences and audio-style features, then ranks the best matches.
 It also includes simple fairness improvements so the top results are not dominated by one artist or one genre.
 
+Recent updates:
+- Refactored models into `src/models.py` (`Song`, `UserProfile`)
+- Kept scoring and ranking logic in `src/recommender.py`
+- Consolidated duplicate diversity penalty logic into one shared helper
+- Improved CLI output readability with a ranked ASCII table
+
 ---
 
 ## How The System Works
@@ -73,10 +79,17 @@ Dependencies: `pandas`, `pytest`, `streamlit`
 From the project root:
 
 ```bash
+python -m src.main
+```
+
+Alternative (also supported):
+
+```bash
 python src/main.py
 ```
 
 The terminal output is shown as a formatted ASCII table with:
+- rank
 - title
 - artist
 - score
@@ -98,6 +111,7 @@ Main experiments completed:
 - Out-of-range energy profile
 - Weight shift sensitivity test (energy up, genre down)
 - Diversity penalty test (artist/genre repetition penalties)
+- Mood alias sensitivity check (`upbeat` vs `happy`)
 
 Observed behavior:
 - Rankings are very sensitive to energy weighting.
@@ -110,15 +124,28 @@ Observed behavior:
 
 ```
 src/
-  recommender.py   # Core scoring, ranking, Song/UserProfile classes, Recommender
-  main.py          # CLI runner with formatted ASCII table output
+  __init__.py      # Package exports
+  models.py        # Song and UserProfile dataclasses
+  recommender.py   # Core scoring and ranking logic, functional API + Recommender class
+  main.py          # CLI runner with ranked ASCII table output
 tests/
   test_recommender.py  # Unit tests
 data/
   songs.csv        # 10-song catalog with 16 features
+assets/
+  image.png        # Project image asset
+  image-1.png      # Additional project image asset
 model_card.md      # Model card with bias and evaluation notes
 reflection.md      # Project reflection
 ```
+
+---
+
+## Assets
+
+Project images are stored in `assets/`:
+- ![Project image](assets/image.png)
+- ![Project image 2](assets/image-1.png)
 
 ---
 
