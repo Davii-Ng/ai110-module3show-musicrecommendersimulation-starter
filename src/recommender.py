@@ -1,7 +1,8 @@
 from typing import List, Dict, Tuple, Any
-from dataclasses import dataclass
 import csv
 import math
+
+from .models import Song, UserProfile
 
 
 def _safe_float(value: Any, default: float) -> float:
@@ -168,39 +169,25 @@ def _score_song_data(song: Dict[str, Any], user_prefs: Dict[str, Any]) -> Tuple[
 
     return score, reasons
 
-@dataclass
-class Song:
-    """
-    Represents a song and its attributes.
-    Required by tests/test_recommender.py
-    """
-    id: int
-    title: str
-    artist: str
-    genre: str
-    mood: str
-    energy: float
-    tempo_bpm: float
-    valence: float
-    danceability: float
-    acousticness: float
-    popularity: int = 50
-    release_decade: int = 2010
-    mood_tag: str = "balanced"
-    instrumentalness: float = 0.2
-    vocal_presence: float = 0.8
-    brightness: float = 0.5
 
-@dataclass
-class UserProfile:
-    """
-    Represents a user's taste preferences.
-    Required by tests/test_recommender.py
-    """
-    favorite_genre: str
-    favorite_mood: str
-    target_energy: float
-    likes_acoustic: bool
+def _diversity_penalty_values(
+    artist: str,
+    genre: str,
+    chosen_pairs: List[Tuple[str, str]],
+) -> Tuple[float, List[str]]:
+    """Return a penalty for repeating artist or genre in top-ranked results."""
+    penalty = 0.0
+    reasons: List[str] = []
+
+    if any(existing_artist == artist for existing_artist, _ in chosen_pairs):
+        penalty += 2.0
+        reasons.append("artist already in top results (-2.0)")
+
+    if any(existing_genre == genre for _, existing_genre in chosen_pairs):
+        penalty += 1.0
+        reasons.append("genre already in top results (-1.0)")
+
+    return penalty, reasons
 
 class Recommender:
     """
@@ -213,18 +200,8 @@ class Recommender:
     @staticmethod
     def _diversity_penalty(song: Song, chosen_songs: List[Song]) -> Tuple[float, List[str]]:
         """Return a penalty for repeating an artist or genre already in the top results."""
-        penalty = 0.0
-        reasons: List[str] = []
-
-        if any(existing_song.artist == song.artist for existing_song in chosen_songs):
-            penalty += 2.0
-            reasons.append("artist already in top results (-2.0)")
-
-        if any(existing_song.genre == song.genre for existing_song in chosen_songs):
-            penalty += 1.0
-            reasons.append("genre already in top results (-1.0)")
-
-        return penalty, reasons
+        chosen_pairs = [(existing_song.artist, existing_song.genre) for existing_song in chosen_songs]
+        return _diversity_penalty_values(song.artist, song.genre, chosen_pairs)
 
     @staticmethod
     def _gaussian_similarity(value: float, target: float, sigma: float = 0.15) -> float:
@@ -312,10 +289,6 @@ def load_songs(csv_path: str) -> List[Dict]:
 
 def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tuple[Dict, float, str]]:
     """Score all songs, rank them, and return the top k recommendations."""
-    def gaussian_similarity(value: float, target: float, sigma: float = 0.15) -> float:
-        """Return a Gaussian similarity score for two numeric values."""
-        return math.exp(-((value - target) ** 2) / (2 * sigma ** 2))
-
     recommendations: List[Tuple[Dict, float, List[str]]] = []
 
     for song in songs:
@@ -328,16 +301,8 @@ def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tup
     chosen_songs: List[Dict] = []
 
     for song, base_score, reasons in recommendations:
-        penalty = 0.0
-        penalty_reasons: List[str] = []
-
-        if any(existing_song["artist"] == song["artist"] for existing_song in chosen_songs):
-            penalty += 2.0
-            penalty_reasons.append("artist already in top results (-2.0)")
-
-        if any(existing_song["genre"] == song["genre"] for existing_song in chosen_songs):
-            penalty += 1.0
-            penalty_reasons.append("genre already in top results (-1.0)")
+        chosen_pairs = [(existing_song["artist"], existing_song["genre"]) for existing_song in chosen_songs]
+        penalty, penalty_reasons = _diversity_penalty_values(song["artist"], song["genre"], chosen_pairs)
 
         adjusted_score = base_score - penalty
         adjusted_reasons = list(reasons)
